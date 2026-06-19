@@ -1100,6 +1100,9 @@ The server reads the projected Kubernetes ServiceAccount token from a file insid
 # Enable Workload Identity Federation
 TRACKER_WLIF_ENABLED=true
 
+# Required: ID of the Yandex Cloud Service Account bound to the federation
+TRACKER_WLIF_SERVICE_ACCOUNT_ID=your_yc_service_account_id
+
 # Optional: customize the projected token path (default shown below)
 # TRACKER_WLIF_TOKEN_PATH=/var/run/secrets/yandex.cloud/serviceaccount/token
 

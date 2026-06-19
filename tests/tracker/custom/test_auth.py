@@ -168,7 +168,7 @@ class TestAuthenticationPriority:
         service_account = ServiceAccountSettings(
             key_id="key-id", service_account_id="sa-id", private_key="private-key"
         )
-        wlif = WorkloadIdentitySettings()
+        wlif = WorkloadIdentitySettings(service_account_id="sa-id")
 
         mock_sa_store = mocker.Mock(spec=ServiceAccountStore)
         mock_sa_store.get_iam_token = mocker.AsyncMock(return_value="sa-iam-token")
@@ -209,7 +209,7 @@ class TestWorkloadIdentityAuthentication:
     """Tests for Workload Identity Federation authentication."""
 
     async def test_build_headers_workload_identity_iam(self, mocker: MockerFixture):
-        wlif = WorkloadIdentitySettings()
+        wlif = WorkloadIdentitySettings(service_account_id="sa-id")
 
         mock_store = mocker.Mock(spec=WorkloadIdentityStore)
         mock_store.get_iam_token = mocker.AsyncMock(return_value="wlif-iam-token")

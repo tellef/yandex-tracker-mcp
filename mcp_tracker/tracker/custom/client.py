@@ -100,6 +100,10 @@ class WorkloadIdentitySettings(BaseModel):
     See: https://yandex.cloud/docs/managed-kubernetes/operations/kubernetes-cluster/kubernetes-cluster-wlif-integration
     """
 
+    # ID of the Yandex Cloud Service Account bound to the federation via
+    # federated credential. Used as the `audience` parameter in the token
+    # exchange request.
+    service_account_id: str
     token_path: str = "/var/run/secrets/yandex.cloud/serviceaccount/token"
     token_exchange_url: str = "https://auth.yandex.cloud/oauth/token"
 
@@ -288,10 +292,12 @@ class WorkloadIdentityStore:
                 f"ServiceAccount token volume mounted at this path."
             )
 
-        # Exchange the projected token for an IAM token via the federation endpoint
+        # Exchange the projected token for an IAM token via the federation endpoint.
+        # `audience` identifies the YC service account bound to the federation.
         data = {
             "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
             "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "audience": self._settings.service_account_id,
             "subject_token": projected_token,
             "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
         }

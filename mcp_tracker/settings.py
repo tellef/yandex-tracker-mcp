@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # When enabled, the server reads a projected ServiceAccount token from
     # tracker_wlif_token_path and exchanges it for an IAM token.
     tracker_wlif_enabled: bool = False
+    tracker_wlif_service_account_id: str | None = None
     tracker_wlif_token_path: str = (
         "/var/run/secrets/yandex.cloud/serviceaccount/token"
     )
@@ -92,6 +93,12 @@ class Settings(BaseSettings):
                         raise ValueError(
                             "tracker_sa_key_id, tracker_sa_service_account_id and tracker_sa_private_key must be set when configuring service account access"
                         )
+
+            if self.tracker_wlif_enabled and not self.tracker_wlif_service_account_id:
+                raise ValueError(
+                    "tracker_wlif_service_account_id must be set when "
+                    "tracker_wlif_enabled is True"
+                )
 
         return self
 

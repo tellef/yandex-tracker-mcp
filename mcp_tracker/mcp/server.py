@@ -73,7 +73,11 @@ def make_tracker_lifespan(settings: Settings) -> Lifespan:
 
         workload_identity_settings: WorkloadIdentitySettings | None = None
         if settings.tracker_wlif_enabled:
+            assert settings.tracker_wlif_service_account_id, (
+                "tracker_wlif_service_account_id must be set"
+            )
             workload_identity_settings = WorkloadIdentitySettings(
+                service_account_id=settings.tracker_wlif_service_account_id,
                 token_path=settings.tracker_wlif_token_path,
                 token_exchange_url=settings.tracker_wlif_token_exchange_url,
             )

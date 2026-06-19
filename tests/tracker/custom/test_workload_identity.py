@@ -18,6 +18,7 @@ class TestWorkloadIdentityStore:
         token_file.write_text("fake-projected-jwt-token")
 
         settings = WorkloadIdentitySettings(
+            service_account_id="sa-id",
             token_path=str(token_file),
             token_exchange_url="https://auth.yandex.cloud/oauth/token",
         )
@@ -45,6 +46,7 @@ class TestWorkloadIdentityStore:
     async def test_fetch_iam_token_missing_file(self, tmp_path):
         """Test error when projected token file does not exist."""
         settings = WorkloadIdentitySettings(
+            service_account_id="sa-id",
             token_path=str(tmp_path / "nonexistent"),
         )
 
@@ -66,6 +68,7 @@ class TestWorkloadIdentityStore:
         token_file.write_text("fake-projected-jwt-token")
 
         settings = WorkloadIdentitySettings(
+            service_account_id="sa-id",
             token_path=str(token_file),
             token_exchange_url="https://auth.yandex.cloud/oauth/token",
         )
@@ -95,6 +98,7 @@ class TestWorkloadIdentityStore:
         token_file.write_text("fake-projected-jwt-token")
 
         settings = WorkloadIdentitySettings(
+            service_account_id="sa-id",
             token_path=str(token_file),
             token_exchange_url="https://auth.yandex.cloud/oauth/token",
         )
@@ -123,6 +127,7 @@ class TestWorkloadIdentityStore:
         token_file.write_text("fake-projected-jwt-token")
 
         settings = WorkloadIdentitySettings(
+            service_account_id="sa-id",
             token_path=str(token_file),
             token_exchange_url="https://auth.yandex.cloud/oauth/token",
         )
@@ -152,7 +157,7 @@ class TestWorkloadIdentityStore:
 class TestWorkloadIdentitySettings:
     def test_default_token_path(self):
         """Test default token path matches Yandex Cloud convention."""
-        settings = WorkloadIdentitySettings()
+        settings = WorkloadIdentitySettings(service_account_id="sa-id")
         assert (
             settings.token_path
             == "/var/run/secrets/yandex.cloud/serviceaccount/token"
@@ -160,12 +165,13 @@ class TestWorkloadIdentitySettings:
 
     def test_default_exchange_url(self):
         """Test default token exchange URL."""
-        settings = WorkloadIdentitySettings()
+        settings = WorkloadIdentitySettings(service_account_id="sa-id")
         assert settings.token_exchange_url == "https://auth.yandex.cloud/oauth/token"
 
     def test_custom_settings(self):
         """Test custom settings override defaults."""
         settings = WorkloadIdentitySettings(
+            service_account_id="sa-id",
             token_path="/custom/path/token",
             token_exchange_url="https://custom.example.com/oauth",
         )
