@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Features
+- Add Yandex Cloud **Workload Identity Federation** (WLIF) authentication for Managed Service for Kubernetes
+  - New env vars: `TRACKER_WLIF_ENABLED`, `TRACKER_WLIF_TOKEN_PATH`, `TRACKER_WLIF_TOKEN_EXCHANGE_URL`
+  - Reads projected ServiceAccount token from the pod and exchanges it for an IAM token via `https://auth.yandex.cloud/oauth/token`
+  - Automatically refreshes the IAM token before expiration
+  - No static keys or secrets required when running in Yandex Managed Kubernetes with WLIF enabled
+  - Default token path follows Yandex Cloud convention: `/var/run/secrets/yandex.cloud/serviceaccount/token`
+
 ## [0.7.2] - 2026-06-19
 
 ### Features

@@ -18,7 +18,11 @@ from mcp_tracker.mcp.resources import register_resources
 from mcp_tracker.mcp.tools import register_all_tools
 from mcp_tracker.settings import Settings
 from mcp_tracker.tracker.caching.client import make_cached_protocols
-from mcp_tracker.tracker.custom.client import ServiceAccountSettings, TrackerClient
+from mcp_tracker.tracker.custom.client import (
+    ServiceAccountSettings,
+    TrackerClient,
+    WorkloadIdentitySettings,
+)
 from mcp_tracker.tracker.proto.fields import GlobalDataProtocol
 from mcp_tracker.tracker.proto.issues import IssueProtocol
 from mcp_tracker.tracker.proto.queues import QueuesProtocol
@@ -67,12 +71,20 @@ def make_tracker_lifespan(settings: Settings) -> Lifespan:
                 private_key=settings.tracker_sa_private_key,
             )
 
+        workload_identity_settings: WorkloadIdentitySettings | None = None
+        if settings.tracker_wlif_enabled:
+            workload_identity_settings = WorkloadIdentitySettings(
+                token_path=settings.tracker_wlif_token_path,
+                token_exchange_url=settings.tracker_wlif_token_exchange_url,
+            )
+
         tracker = TrackerClient(
             base_url=settings.tracker_api_base_url,
             token=settings.tracker_token,
             token_type=settings.oauth_token_type,
             iam_token=settings.tracker_iam_token,
             service_account=service_account_settings,
+            workload_identity=workload_identity_settings,
             cloud_org_id=settings.tracker_cloud_org_id,
             org_id=settings.tracker_org_id,
         )

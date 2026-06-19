@@ -5,6 +5,8 @@ from mcp_tracker.tracker.custom.client import (
     ServiceAccountSettings,
     ServiceAccountStore,
     TrackerClient,
+    WorkloadIdentitySettings,
+    WorkloadIdentityStore,
 )
 from mcp_tracker.tracker.proto.common import YandexAuth
 
@@ -160,6 +162,40 @@ class TestAuthenticationPriority:
         assert headers["Authorization"] == "Bearer static-iam"
         mock_store.get_iam_token.assert_not_called()
 
+    async def test_auth_priority_service_account_over_wlif(
+        self, mocker: MockerFixture
+    ):
+        service_account = ServiceAccountSettings(
+            key_id="key-id", service_account_id="sa-id", private_key="private-key"
+        )
+        wlif = WorkloadIdentitySettings()
+
+        mock_sa_store = mocker.Mock(spec=ServiceAccountStore)
+        mock_sa_store.get_iam_token = mocker.AsyncMock(return_value="sa-iam-token")
+
+        mock_wlif_store = mocker.Mock(spec=WorkloadIdentityStore)
+        mock_wlif_store.get_iam_token = mocker.AsyncMock(
+            return_value="wlif-iam-token"
+        )
+
+        # Mock the yandexcloud.SDK to avoid real initialization
+        mocker.patch("mcp_tracker.tracker.custom.client.yandexcloud.SDK")
+
+        client = TrackerClient(
+            token=None,
+            service_account=service_account,
+            workload_identity=wlif,
+            org_id="test-org",
+        )
+        client._service_account_store = mock_sa_store
+        client._workload_identity_store = mock_wlif_store
+
+        headers = await client._build_headers()
+
+        assert headers["Authorization"] == "Bearer sa-iam-token"
+        mock_sa_store.get_iam_token.assert_called_once()
+        mock_wlif_store.get_iam_token.assert_not_called()
+
     async def test_no_auth_provided_raises_error(self):
         client = TrackerClient(
             token=None, iam_token=None, service_account=None, org_id="test-org"
@@ -167,6 +203,30 @@ class TestAuthenticationPriority:
 
         with pytest.raises(ValueError, match="No authentication method provided"):
             await client._build_headers()
+
+
+class TestWorkloadIdentityAuthentication:
+    """Tests for Workload Identity Federation authentication."""
+
+    async def test_build_headers_workload_identity_iam(self, mocker: MockerFixture):
+        wlif = WorkloadIdentitySettings()
+
+        mock_store = mocker.Mock(spec=WorkloadIdentityStore)
+        mock_store.get_iam_token = mocker.AsyncMock(return_value="wlif-iam-token")
+
+        client = TrackerClient(
+            token=None, workload_identity=wlif, org_id="test-org"
+        )
+        client._workload_identity_store = mock_store
+
+        headers = await client._build_headers()
+
+        expected = {
+            "Authorization": "Bearer wlif-iam-token",
+            "X-Org-ID": "test-org",
+        }
+        assert headers == expected
+        mock_store.get_iam_token.assert_called_once()
 
 
 class TestOIDCAuthentication:

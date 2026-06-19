@@ -89,6 +89,21 @@ class ServiceAccountSettings(BaseModel):
         }
 
 
+class WorkloadIdentitySettings(BaseModel):
+    """Settings for Yandex Cloud Workload Identity Federation authentication.
+
+    When running in Yandex Managed Service for Kubernetes with Workload Identity
+    Federation enabled, the kubelet projects a short-lived JWT token for the
+    Kubernetes ServiceAccount into a file inside the pod. This token can be
+    exchanged for a Yandex Cloud IAM token via the federation OAuth endpoint.
+
+    See: https://yandex.cloud/docs/managed-kubernetes/operations/kubernetes-cluster/kubernetes-cluster-wlif-integration
+    """
+
+    token_path: str = "/var/run/secrets/yandex.cloud/serviceaccount/token"
+    token_exchange_url: str = "https://auth.yandex.cloud/oauth/token"
+
+
 class IAMTokenInfo(BaseModel):
     token: str
 
@@ -180,6 +195,129 @@ class ServiceAccountStore:
         return IAMTokenInfo(token=iam_token.iam_token)
 
 
+class WorkloadIdentityStore:
+    """Manages IAM tokens using Yandex Cloud Workload Identity Federation.
+
+    Reads a projected Kubernetes ServiceAccount token from a file and exchanges
+    it for a Yandex Cloud IAM token via the federation OAuth endpoint.
+    The kubelet automatically rotates the projected token before expiration.
+    """
+
+    DEFAULT_REFRESH_INTERVAL: float = 3500.0
+    DEFAULT_RETRY_INTERVAL: float = 10.0
+
+    def __init__(
+        self,
+        settings: WorkloadIdentitySettings,
+        *,
+        refresh_interval: float | None = None,
+        retry_interval: float | None = None,
+    ):
+        self._settings = settings
+        self._refresh_interval = refresh_interval or self.DEFAULT_REFRESH_INTERVAL
+        self._retry_interval = retry_interval or self.DEFAULT_RETRY_INTERVAL
+
+        self._session: ClientSession | None = None
+        self._iam_token: IAMTokenInfo | None = None
+        self._lock = asyncio.Lock()
+        self._refresh_task: asyncio.Task[None] | None = None
+
+    async def prepare(self):
+        self._session = ClientSession(timeout=ClientTimeout(total=10))
+        self._refresh_task = asyncio.create_task(self._refresher())
+
+    async def close(self):
+        try:
+            if self._refresh_task is not None:
+                self._refresh_task.cancel()
+                await self._refresh_task
+                self._refresh_task = None
+        except CancelledError:
+            pass
+        except Exception as e:  # pragma: no cover
+            logger.error("error while closing WorkloadIdentityStore: %s", e)
+
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
+
+    async def get_iam_token(self, *, force_refresh: bool = False) -> str:
+        if force_refresh or self._iam_token is None:
+            async with self._lock:
+                if not force_refresh and self._iam_token is not None:
+                    return self._iam_token.token
+
+                iam_token = await self._fetch_iam_token()
+                self._iam_token = iam_token
+                logger.info(
+                    "Successfully fetched new IAM token via Workload Identity."
+                )
+
+        return self._iam_token.token
+
+    async def _refresher(self):
+        while True:
+            try:
+                await self.get_iam_token(force_refresh=True)
+                interval = self._refresh_interval
+            except asyncio.CancelledError:  # pragma: no cover
+                return
+            except Exception as e:
+                logger.error("Error refreshing IAM token via WLIF: %s", e)
+                interval = self._retry_interval
+
+            jitter = random.random() * min(interval * 0.1, 100)
+            await asyncio.sleep(interval + jitter)
+
+    async def _fetch_iam_token(self) -> IAMTokenInfo:
+        """Read projected SA token and exchange it for Yandex Cloud IAM token."""
+        if self._session is None:
+            raise RuntimeError(
+                "WorkloadIdentityStore session is not initialized. "
+                "Call prepare() first."
+            )
+
+        # Read the projected ServiceAccount token from the file
+        try:
+            with open(self._settings.token_path) as f:
+                projected_token = f.read().strip()
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Workload Identity token file not found at "
+                f"{self._settings.token_path}. Ensure the pod has a projected "
+                f"ServiceAccount token volume mounted at this path."
+            )
+
+        # Exchange the projected token for an IAM token via the federation endpoint
+        data = {
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "subject_token": projected_token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+        }
+
+        async with self._session.post(
+            self._settings.token_exchange_url,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        ) as response:
+            if response.status != 200:
+                body = await response.text()
+                raise RuntimeError(
+                    f"Failed to exchange projected token for IAM token: "
+                    f"status={response.status}, body={body}"
+                )
+            payload = await response.json()
+
+        iam_token = payload.get("access_token")
+        if not iam_token:
+            raise RuntimeError(
+                f"Token exchange response missing 'access_token': {payload}"
+            )
+
+        return IAMTokenInfo(token=iam_token)
+
+
 class TrackerClient(QueuesProtocol, IssueProtocol, GlobalDataProtocol, UsersProtocol):
     def __init__(
         self,
@@ -188,6 +326,7 @@ class TrackerClient(QueuesProtocol, IssueProtocol, GlobalDataProtocol, UsersProt
         iam_token: str | None = None,
         token_type: Literal["Bearer", "OAuth"] | None = None,
         service_account: ServiceAccountSettings | None = None,
+        workload_identity: WorkloadIdentitySettings | None = None,
         org_id: str | None = None,
         cloud_org_id: str | None = None,
         base_url: str = "https://api.tracker.yandex.net",
@@ -198,6 +337,9 @@ class TrackerClient(QueuesProtocol, IssueProtocol, GlobalDataProtocol, UsersProt
         self._static_iam_token = iam_token
         self._service_account_store: ServiceAccountStore | None = (
             ServiceAccountStore(service_account) if service_account else None
+        )
+        self._workload_identity_store: WorkloadIdentityStore | None = (
+            WorkloadIdentityStore(workload_identity) if workload_identity else None
         )
         self._org_id = org_id
         self._cloud_org_id = cloud_org_id
@@ -210,14 +352,18 @@ class TrackerClient(QueuesProtocol, IssueProtocol, GlobalDataProtocol, UsersProt
     async def prepare(self):
         if self._service_account_store:
             await self._service_account_store.prepare()
+        if self._workload_identity_store:
+            await self._workload_identity_store.prepare()
 
     async def close(self):
         if self._service_account_store:
             await self._service_account_store.close()
+        if self._workload_identity_store:
+            await self._workload_identity_store.close()
         await self._session.close()
 
     async def _build_headers(self, auth: YandexAuth | None = None) -> dict[str, str]:
-        # Priority: OAuth from auth > static OAuth > static IAM token > service account
+        # Priority: OAuth from auth > static OAuth > static IAM token > service account > workload identity
         auth_header = None
 
         if auth and auth.token:
@@ -230,6 +376,9 @@ class TrackerClient(QueuesProtocol, IssueProtocol, GlobalDataProtocol, UsersProt
             auth_header = f"Bearer {self._static_iam_token}"
         elif self._service_account_store is not None:
             iam_token = await self._service_account_store.get_iam_token()
+            auth_header = f"Bearer {iam_token}"
+        elif self._workload_identity_store is not None:
+            iam_token = await self._workload_identity_store.get_iam_token()
             auth_header = f"Bearer {iam_token}"
 
         if not auth_header:

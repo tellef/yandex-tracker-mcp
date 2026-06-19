@@ -1090,7 +1090,50 @@ TRACKER_SA_PRIVATE_KEY=your_private_key
 TRACKER_CLOUD_ORG_ID=your_cloud_org_id  # or TRACKER_ORG_ID
 ```
 
-#### Scenario 6: Federative OAuth for OIDC Applications (Advanced)
+#### Scenario 6: Workload Identity Federation (Yandex Managed Kubernetes)
+
+For workloads running in [Yandex Managed Service for Kubernetes](https://yandex.cloud/docs/managed-kubernetes/) with [Workload Identity Federation](https://yandex.cloud/docs/managed-kubernetes/operations/kubernetes-cluster/kubernetes-cluster-wlif-integration) enabled, the server can authenticate without any static keys.
+
+The server reads the projected Kubernetes ServiceAccount token from a file inside the pod and exchanges it for a Yandex Cloud IAM token via the federation OAuth endpoint. The IAM token is automatically refreshed before expiration.
+
+```env
+# Enable Workload Identity Federation
+TRACKER_WLIF_ENABLED=true
+
+# Optional: customize the projected token path (default shown below)
+# TRACKER_WLIF_TOKEN_PATH=/var/run/secrets/yandex.cloud/serviceaccount/token
+
+# Organization ID (choose one)
+TRACKER_CLOUD_ORG_ID=your_cloud_org_id  # or TRACKER_ORG_ID
+```
+
+**Kubernetes setup requirements:**
+1. The Kubernetes cluster must have Workload Identity Federation enabled
+2. Create a Yandex Cloud Service Account and grant it `tracker.user` role
+3. Configure a federated credential binding the Kubernetes ServiceAccount to the YC Service Account
+4. Annotate the K8s ServiceAccount: `iam.yandex.cloud/service-account-id: <SA_ID>`
+5. Mount a projected ServiceAccount token in the pod with the federation audience:
+
+```yaml
+spec:
+  serviceAccountName: my-app
+  containers:
+  - name: app
+    volumeMounts:
+    - name: workload-identity-token
+      mountPath: /var/run/secrets/yandex.cloud/serviceaccount
+      readOnly: true
+  volumes:
+  - name: workload-identity-token
+    projected:
+      sources:
+      - serviceAccountToken:
+          path: token
+          audience: https://storage.yandexcloud.net/mk8s-oidc/v1/clusters/<CLUSTER_ID>
+          expirationSeconds: 3600
+```
+
+#### Scenario 7: Federative OAuth for OIDC Applications (Advanced)
 ```env
 # Enable OAuth with Yandex Cloud federation
 OAUTH_ENABLED=true

@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     tracker_sa_service_account_id: str | None = None
     tracker_sa_private_key: str | None = None
 
+    # Yandex Cloud Workload Identity Federation (for Managed Kubernetes)
+    # When enabled, the server reads a projected ServiceAccount token from
+    # tracker_wlif_token_path and exchanges it for an IAM token.
+    tracker_wlif_enabled: bool = False
+    tracker_wlif_token_path: str = (
+        "/var/run/secrets/yandex.cloud/serviceaccount/token"
+    )
+    tracker_wlif_token_exchange_url: str = "https://auth.yandex.cloud/oauth/token"
+
     redis_endpoint: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
@@ -65,10 +74,15 @@ class Settings(BaseSettings):
                 raise ValueError("server_url must be set when oauth_enabled is True")
 
         else:
-            if not self.tracker_token and not self.tracker_iam_token:
+            if (
+                not self.tracker_token
+                and not self.tracker_iam_token
+                and not self.tracker_wlif_enabled
+            ):
                 if self.tracker_sa_key_id is None:
                     raise ValueError(
-                        "tracker_token or tracker_iam_token or tracker_sa_* must be set when oauth_enabled is False"
+                        "tracker_token or tracker_iam_token or tracker_sa_* or "
+                        "tracker_wlif_enabled must be set when oauth_enabled is False"
                     )
                 else:
                     if (
